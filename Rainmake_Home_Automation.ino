@@ -24,6 +24,10 @@ D32	IN8
 #include "WiFi.h"
 #include "WiFiProv.h"
 #include <Preferences.h>
+#include <esp_timer.h>
+#include <nvs.h>
+#include <nvs_flash.h>
+#include <time.h>
 
 // For Turning On and Off the debug logs
 #define DEBUG_SW 1
@@ -260,6 +264,84 @@ void getRelayState()
   delay(200);
 }
 
+nvs_handle myNvsHandle;
+// NTP server settings
+const char* ntpServer = "time.nist.gov";
+const long gmtOffset_sec = 0; // Adjust as per your timezone
+const int daylightOffset_sec = 0; // Adjust for daylight saving time if applicable
+
+void detect_Power_cycle(unsigned int sec_time)
+{
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.print("Connected to WiFi. IP Address: ");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("Failed to connect with WiFi");
+    return;
+  }
+  // Initialize NVS
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+      nvs_flash_erase(); // Erase if necessary
+      nvs_flash_init();
+  }
+
+  // Open NVS handle
+  err = nvs_open("storage", NVS_READWRITE, &myNvsHandle);
+  if (err != ESP_OK) {
+    Serial.println("Error opening NVS handle!");
+    return;
+  }
+  
+  // Initialize NTP
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  Serial.println("Synchronizing time...");
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo, 10000)) {
+    Serial.printf("Failed to obtain time...");
+    return;
+  }
+  Serial.println("Time synchronized");
+
+  // Get the last stored timestamp
+  uint32_t lastTimestamp = 0;
+  err = nvs_get_u32(myNvsHandle, "lastTime", &lastTimestamp);
+  if (err == ESP_ERR_NVS_NOT_FOUND) {
+    Serial.println("No previous timestamp found.");
+  } else if (err == ESP_OK) {
+    Serial.print("Last timestamp: ");
+    Serial.println(lastTimestamp);
+  } else {
+    Serial.println("Error reading last timestamp!");
+  }
+
+  // Get the current timestamp from the network time
+  time_t now = time(NULL);
+  uint32_t currentTimestamp = now; // Current time in seconds since the epoch
+  Serial.print("Current timestamp: ");
+  Serial.println(currentTimestamp);
+
+  // Check if the time difference is less than 5 seconds
+  if (lastTimestamp != 0 && (currentTimestamp - lastTimestamp) <= sec_time) {
+    Serial.printf("Power cycle detected within %d seconds!", (currentTimestamp - lastTimestamp));
+    RMakerFactoryReset(2);
+  } else {
+    Serial.println("No power cycle detected.");
+  }
+
+  // Store the current timestamp in NVS
+  err = nvs_set_u32(myNvsHandle, "lastTime", currentTimestamp);
+  if (err != ESP_OK) {
+    Serial.println("Error setting timestamp!");
+  } else {
+    Serial.println("Timestamp saved.");
+    nvs_commit(myNvsHandle);
+  }
+
+  // Close NVS handle
+  nvs_close(myNvsHandle);
+}
+
 void setup()
 {
   if (DEBUG_SW)Serial.begin(115200);
@@ -347,6 +429,7 @@ void setup()
 #endif
 
   getRelayState(); // Get the last state of Relays
+  detect_Power_cycle(30); //30s power cycle duration
 }
 
 void loop()
@@ -372,5 +455,4 @@ void loop()
       RMakerFactoryReset(2);
     }
   }
-  delay(100);
 }
