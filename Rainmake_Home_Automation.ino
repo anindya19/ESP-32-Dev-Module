@@ -149,17 +149,10 @@ void detect_Power_cycle(unsigned int sec_time)
 	struct tm timeinfo;
   uint32_t currentTimestamp = 0;
 
-  if (WiFi.status() == WL_CONNECTED) {
-      Serial.print("Connected to WiFi. IP Address: ");
-      Serial.println(WiFi.localIP());
-  } else {
-      Serial.println("Failed to connect with WiFi");
-#if CONFIG_IDF_TARGET_ESP32
-      WiFiProv.beginProvision(NETWORK_PROV_SCHEME_BLE, NETWORK_PROV_SCHEME_HANDLER_FREE_BTDM, NETWORK_PROV_SECURITY_1, pop, service_name);
-#else
-      WiFiProv.beginProvision(NETWORK_PROV_SCHEME_SOFTAP, NETWORK_PROV_SCHEME_HANDLER_NONE, NETWORK_PROV_SECURITY_1, pop, service_name);
-#endif
-      return;
+  while (WiFi.status() != WL_CONNECTED) {
+        Serial.println("Trying to connect to WiFi...");
+        delay(5000);  // Wait for 5 seconds before retrying
+        WiFi.reconnect();  // Attempt to reconnect if disconnected
   }
 
   // Open the Preferences storage (namespace: "timestamp", read-write mode)
