@@ -39,7 +39,7 @@ D32	IN8
 Preferences pref, pref2;
 
 // Relay State
-bool switch_state[8] = {LOW, LOW, LOW, LOW, LOW, LOW, LOW, LOW};
+bool switch_state[8] = {LOW, LOW, LOW, LOW, LOW/*, LOW, LOW, LOW*/};
 
 // BLE Credentials
 const char *service_name = "PROV_home_automation"; // BLE node name
@@ -49,7 +49,7 @@ const char *pop = "123456"; // password
 char nodeName[] = "Smart_Home";
 
 // GPIO for Relay (Appliance Control)
-static uint8_t relays[] = {13, 15, 14, 27, 26, 25, 33, 32};
+static uint8_t relays[] = {13, 15, 14, 27, 26/*, 25, 33, 32*/};
 
 // GPIO for h/w reset pin & Temp/humidity sensor
 static uint8_t gpio_reset = 0;   // Reset Pin
@@ -60,10 +60,10 @@ static Switch *switches[8] = {
     new Switch("Switch2", &relays[1]),
     new Switch("Switch3", &relays[2]),
     new Switch("Switch4", &relays[3]),
-    new Switch("Switch5", &relays[4]),
+    new Switch("Switch5", &relays[4])/*,
     new Switch("Switch6", &relays[5]),
     new Switch("Switch7", &relays[6]),
-    new Switch("Switch8", &relays[7])
+    new Switch("Switch8", &relays[7])*/
 };
 
 // Wi-Fi connection handler
@@ -106,7 +106,7 @@ void sysProvEvent(arduino_event_t *sys_event)
 // Callback for switch power state change
 void write_callback(Device *device, Param *param, const param_val_t val, void *priv_data, write_ctx_t *ctx)
 {
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 5; ++i)
     {
         if (strcmp(device->getDeviceName(), switches[i]->getDeviceName()) == 0)
         {
@@ -126,7 +126,7 @@ void write_callback(Device *device, Param *param, const param_val_t val, void *p
 // Function to recall the last state
 void getRelayState()
 {
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 5; ++i)
     {
         switch_state[i] = pref.getBool(("Relay" + String(i + 1)).c_str(), 0);
         Serial.print("Last State Relay" + String(i + 1) + " - ");
@@ -139,60 +139,53 @@ void getRelayState()
 
 // NTP server settings
 const char* ntpServer = "time.nist.gov";
-const long gmtOffset_sec = 0; // Adjust as per your timezone
+const long gmtOffset_sec = 19800; // Adjust as per your timezone
 const int daylightOffset_sec = 0; // Adjust for daylight saving time if applicable
 
-void detect_Power_cycle(unsigned int sec_time)
-{
-	uint32_t lastTimestamp = 0;
-	uint32_t counterValue = 0;
-	struct tm timeinfo;
-  uint32_t currentTimestamp = 0;
+void detect_Power_cycle(unsigned int sec_time) {
+    // Ensure WiFi connection
+    while (WiFi.status() != WL_CONNECTED) {
+        Serial.println("Connecting to WiFi...");
+        WiFi.reconnect();
+        delay(5000);
+    }
 
-  while (WiFi.status() != WL_CONNECTED) {
-        Serial.println("Trying to connect to WiFi...");
-        delay(5000);  // Wait for 5 seconds before retrying
-        WiFi.reconnect();  // Attempt to reconnect if disconnected
-  }
+    // Open Preferences storage
+    if (!pref2.begin("timestamp", false)) {
+        Serial.println("Failed to initialize Preferences");
+        return;
+    }
 
-  // Open the Preferences storage (namespace: "timestamp", read-write mode)
-	if (!pref2.begin("timestamp", false)) {
-		Serial.println("Failed to initialize Preferences");
-		return;
-	}
+    // Synchronize time with NTP
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    Serial.println("Synchronizing time...");
+    struct tm timeinfo;
+    while (!getLocalTime(&timeinfo, 10000)) {
+        Serial.println("Time sync failed. Retrying...");
+        delay(5000);
+    }
 
-  // Initialize NTP
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
-  if (DEBUG_SW) Serial.println("Synchronizing time...");
-  if (!getLocalTime(&timeinfo, 10000)) {
-      Serial.printf("Failed to obtain time...\n");
-      return;
-  }
-  if (DEBUG_SW) Serial.println("Time synchronized");
+    // Log current time
+    uint32_t currentTimestamp = time(NULL);
+    Serial.printf("Current time: %04d-%02d-%02d %02d:%02d:%02d\n",
+                  timeinfo.tm_year + 1900, timeinfo.tm_mon + 1, timeinfo.tm_mday,
+                  timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
 
-	// Retrieve the stored last timestamp value
-	lastTimestamp = pref2.getInt("lastTime", 0);  // Default value is 0 if not found
-	if (DEBUG_SW) Serial.print("Stored lastTimestamp value: ");
-	if (DEBUG_SW) Serial.println(lastTimestamp);
+    // Retrieve last stored timestamp
+    uint32_t lastTimestamp = pref2.getUInt("lastTime", 0);
+    Serial.printf("Last timestamp: %u, Current timestamp: %u\n", lastTimestamp, currentTimestamp);
 
-  // Get the current timestamp from the network time
-  currentTimestamp = time(NULL); // Current time in seconds since the epoch
-  if (DEBUG_SW) Serial.print("Current timestamp: ");
-  if (DEBUG_SW) Serial.println(currentTimestamp);
+    // Detect power cycle
+    if (lastTimestamp && (currentTimestamp - lastTimestamp) <= sec_time) {
+        Serial.printf("Power cycle detected within %u seconds!\n", currentTimestamp - lastTimestamp);
+        RMakerFactoryReset(2);
+    } else {
+        Serial.println("No power cycle detected.");
+    }
 
-  // Check if the time difference is less than 5 seconds
-  if (lastTimestamp != 0 && (currentTimestamp - lastTimestamp) <= sec_time) {
-    Serial.printf("Power cycle detected within %d seconds!", (currentTimestamp - lastTimestamp));
-    RMakerFactoryReset(2);
-  } else {
-    Serial.println("No power cycle detected.");
-  }
-
-  // Store the integer value currentTimestamp with the key "lastTime"
-	pref2.putInt("lastTime", currentTimestamp);
-
-	// Close the Preferences storage
-	pref2.end();
+    // Update timestamp and close Preferences
+    pref2.putUInt("lastTime", currentTimestamp);
+    pref2.end();
 }
 
 void setup()
@@ -202,7 +195,7 @@ void setup()
     pref.begin("Relay_State", false);
 
     // Set the Relays GPIOs as output mode
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 5; ++i)
     {
         pinMode(relays[i], OUTPUT);
         digitalWrite(relays[i], HIGH); // Turn All Relays Off by default
@@ -210,11 +203,12 @@ void setup()
 
     pinMode(gpio_reset, INPUT);
 
+    esp_log_level_set("*", ESP_LOG_DEBUG);
     Node my_node;
     my_node = RMaker.initNode(nodeName);
 
     // For preparing the 8 widgets in Rainmaker
-    for (int i = 0; i < 8; ++i)
+    for (int i = 0; i < 5; ++i)
     {
         switches[i]->addCb(write_callback);
         my_node.addDevice(*switches[i]);
@@ -237,6 +231,7 @@ void setup()
 #endif
 
   getRelayState(); // Get the last state of Relays
+  delay(2000);
   detect_Power_cycle(30); //30s power cycle duration
 }
 
