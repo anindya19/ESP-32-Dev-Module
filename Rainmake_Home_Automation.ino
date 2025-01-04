@@ -142,13 +142,20 @@ const char* ntpServer = "time.nist.gov";
 const long gmtOffset_sec = 19800; // Adjust as per your timezone
 const int daylightOffset_sec = 0; // Adjust for daylight saving time if applicable
 
-void detect_Power_cycle(unsigned int sec_time) {
+void detect_Power_cycle(unsigned int sec_time) 
+{
+  //unsigned int cnt = 0;
     // Ensure WiFi connection
-    while (WiFi.status() != WL_CONNECTED) {
+    /*while (WiFi.status() != WL_CONNECTED) {
         Serial.println("Connecting to WiFi...");
         WiFi.reconnect();
         delay(5000);
-    }
+        cnt++;
+        if (cnt > 5) {
+          Serial.println("detect power cycle timeout");
+          RMakerFactoryReset(2);
+        }
+    }*/
 
     // Open Preferences storage
     if (!pref2.begin("timestamp", false)) {
@@ -231,7 +238,6 @@ void setup()
 #endif
 
   getRelayState(); // Get the last state of Relays
-  delay(2000);
   detect_Power_cycle(30); //30s power cycle duration
 }
 
